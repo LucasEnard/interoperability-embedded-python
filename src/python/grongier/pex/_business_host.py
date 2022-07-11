@@ -1,9 +1,14 @@
 import datetime
+import pickle
+import codecs
 import uuid
 import decimal
 import base64
 import json
 import importlib
+import iris
+
+from inspect import signature
 
 from grongier.dacite import from_dict
 
@@ -13,7 +18,68 @@ class _BusinessHost(_Common):
     """ This is a superclass for BusinessService, BusinesProcess, and BusinessOperation that
     defines common methods. It is a subclass of Common.
     """
+
+    buffer:int = 64000
+
+    def input_serialzer(fonction):
+        """
+        It takes a function as an argument, and returns a function that takes the same arguments as the
+        original function, but serializes the arguments before passing them to the original function
         
+        :param fonction: the function that will be decorated
+        :return: The function dispatch_serializer is being returned.
+        """
+        def dispatch_serializer(self,*params, **param2):
+            serialized=[]
+            for param in params:
+                serialized.append(self._dispatch_serializer(param))
+            return fonction(self,*serialized, **param2)
+        return dispatch_serializer
+
+    def output_deserialzer(fonction):
+        """
+        It takes a function as an argument, and returns a function that takes the same arguments as the
+        original function, but returns the result of the original function passed to the
+        `_dispatch_deserializer` function
+        
+        :param fonction: the function that will be decorated
+        :return: The function dispatch_deserializer is being returned.
+        """
+        def dispatch_deserializer(self,*params, **param2):
+            return self._dispatch_deserializer(fonction(self,*params, **param2))
+            
+        return dispatch_deserializer
+
+    def input_deserialzer(fonction):
+        """
+        It takes a function as input, and returns a function that takes the same arguments as the input
+        function, but deserializes the arguments before passing them to the input function
+        
+        :param fonction: the function that will be decorated
+        :return: The function dispatch_deserializer is being returned.
+        """
+        def dispatch_deserializer(self,*params, **param2):
+            serialized=[]
+            for param in params:
+                serialized.append(self._dispatch_deserializer(param))
+            return fonction(self,*serialized, **param2)
+        return dispatch_deserializer
+
+    def output_serialzer(fonction):
+        """
+        It takes a function as an argument, and returns a function that takes the same arguments as the
+        original function, and returns the result of the original function, after passing it through the
+        _dispatch_serializer function
+        
+        :param fonction: The function that is being decorated
+        :return: The function dispatch_serializer is being returned.
+        """
+        def dispatch_serializer(self,*params, **param2):
+            return self._dispatch_serializer(fonction(self,*params, **param2))
+        return dispatch_serializer
+
+    @input_serialzer
+    @output_deserialzer
     def send_request_sync(self, target, request, timeout=-1, description=None):
         """ Send the specified message to the target business process or business operation synchronously.
             
@@ -29,13 +95,10 @@ class _BusinessHost(_Common):
         Raises:
         TypeError: if request is not of type Message or IRISObject.
         """
-        if self._is_message_instance(request):
-            request = self._serialize(request)
-        return_object = self.iris_handle.dispatchSendRequestSync(target,request,timeout,description)
-        if isinstance(return_object, str):
-            return_object = self._deserialize(return_object)
-        return return_object
 
+        return self.iris_handle.dispatchSendRequestSync(target,request,timeout,description)
+
+    @input_serialzer
     def send_request_async(self, target, request, description=None):
         """ Send the specified message to the target business process or business operation asynchronously.
         Parameters:
@@ -48,10 +111,75 @@ class _BusinessHost(_Common):
         Raises:
         TypeError: if request is not of type Message or IRISObject.
         """
-        if self._is_message_instance(request):
-            request = self._serialize(request)
-        self.iris_handle.dispatchSendRequestAsync(target,request,description)
-        return
+        
+        return self.iris_handle.dispatchSendRequestAsync(target,request,description)
+
+    def _serialize_pickle_message(self,message):
+        """ Converts a python dataclass message into an iris grongier.pex.message.
+
+        Parameters:
+        message: The message to serialize, an instance of a class that is a subclass of Message.
+
+        Returns:
+        string: The message in json format.
+        """
+
+        pickle_string = codecs.encode(pickle.dumps(message), "base64").decode()
+        module = message.__class__.__module__
+        classname = message.__class__.__name__
+
+        msg = iris.cls('Grongier.PEX.PickleMessage')._New()
+        msg.classname = module + "." + classname
+
+        stream = iris.cls('%Stream.GlobalCharacter')._New()
+        n = self.buffer
+        chunks = [pickle_string[i:i+n] for i in range(0, len(pickle_string), n)]
+        for chunk in chunks:
+            stream.Write(chunk)
+        msg.jstr = stream
+
+        return msg
+
+
+    def _dispatch_serializer(self,message):
+        """
+        If the message is a message instance, serialize it as a message, otherwise, if it's a pickle message
+        instance, serialize it as a pickle message, otherwise, return the message
+        
+        :param message: The message to be serialized
+        :return: The serialized message
+        """
+        if (message is not None and self._is_message_instance(message)):
+            return self._serialize_message(message)
+        elif (message is not None and self._is_pickle_message_instance(message)):
+            return self._serialize_pickle_message(message)
+        else:
+            return message
+
+    def _serialize_message(self,message):
+        """ Converts a python dataclass message into an iris grongier.pex.message.
+
+        Parameters:
+        message: The message to serialize, an instance of a class that is a subclass of Message.
+
+        Returns:
+        string: The message in json format.
+        """
+        json_string = json.dumps(message, cls=IrisJSONEncoder)
+        module = message.__class__.__module__
+        classname = message.__class__.__name__
+
+        msg = iris.cls('Grongier.PEX.Message')._New()
+        msg.classname = module + "." + classname
+
+        stream = iris.cls('%Stream.GlobalCharacter')._New()
+        n = self.buffer
+        chunks = [json_string[i:i+n] for i in range(0, len(json_string), n)]
+        for chunk in chunks:
+            stream.Write(chunk)
+        msg.jstr = stream
+
+        return msg
 
 
     def _serialize(self,message):
@@ -63,13 +191,69 @@ class _BusinessHost(_Common):
         Returns:
         string: The message in json format.
         """
-        if (message != None):
+        if (message is not None):
             json_string = json.dumps(message, cls=IrisJSONEncoder)
             module = message.__class__.__module__
             classname = message.__class__.__name__
             return  module + "." + classname + ":" + json_string
         else:
             return None
+
+    def _deserialize_pickle_message(self,serial):
+        """ 
+        Converts an iris grongier.pex.message into an python dataclass message.
+        
+        """
+        string = ""
+        serial.jstr.Rewind()
+        while not serial.jstr.AtEnd:
+            string += serial.jstr.Read(self.buffer)
+
+        msg = pickle.loads(codecs.decode(string.encode(), "base64"))
+        return msg
+
+    def _dispatch_deserializer(self,serial):
+        """
+        If the serialized object is a Message, deserialize it as a Message, otherwise deserialize it as a
+        PickleMessage
+        
+        :param serial: The serialized object
+        :return: The return value is a tuple of the form (serial, serial_type)
+        """
+        if (serial is not None and type(serial).__module__.find('iris') == 0) and serial._IsA("Grongier.PEX.Message"):
+            return self._deserialize_message(serial)
+        elif (serial is not None and type(serial).__module__.find('iris') == 0) and serial._IsA("Grongier.PEX.PickleMessage"):
+            return self._deserialize_pickle_message(serial)
+        else:
+            return serial
+
+    def _deserialize_message(self,serial):
+        """ 
+        Converts an iris grongier.pex.message into an python dataclass message.
+        """
+
+        if (serial.classname is None):
+            raise ValueError("JSON message malformed, must include classname")
+        classname = serial.classname
+
+        j = classname.rindex(".")
+        if (j <=0):
+            raise ValueError("Classname must include a module: " + classname)
+        try:
+            module = importlib.import_module(classname[:j])
+            msg = getattr(module, classname[j+1:])
+        except Exception:
+            raise ImportError("Class not found: " + classname)
+
+        string = ""
+        serial.jstr.Rewind()
+        while not serial.jstr.AtEnd:
+            string += serial.jstr.Read(self.buffer)
+
+        jdict = json.loads(string, cls=IrisJSONDecoder)
+        msg = self._dataclass_from_dict(msg,jdict)
+        return msg
+
 
     def _deserialize(self,serial):
         """ Converts a json string into a message of type classname, which is stored in the json string.
@@ -105,6 +289,13 @@ class _BusinessHost(_Common):
             return None
 
     def _dataclass_from_dict(self,klass, dikt):
+        """
+        > If the field is not in the dataclass, then add it as an attribute
+        
+        :param klass: The dataclass to convert to
+        :param dikt: the dictionary to convert to a dataclass
+        :return: A dataclass object with the fields of the dataclass and the fields of the dictionary.
+        """
         ret = from_dict(klass, dikt)
         
         try:
@@ -117,6 +308,55 @@ class _BusinessHost(_Common):
                 setattr(ret, key, val)
         return ret
 
+    def _dispach_message(self, request):
+        """
+        It takes a request object, and returns a response object
+        
+        :param request: The request object
+        :return: The return value is the result of the method call.
+        """
+
+        call = 'on_message'
+
+        module = request.__class__.__module__
+        classname = request.__class__.__name__
+
+        for msg,method in self.DISPATCH:
+            if msg == module+"."+classname:
+                call = method
+
+        return getattr(self,call)(request)
+
+    
+    def _create_dispatch(self):
+        """
+        It creates a list of tuples, where each tuple contains the name of a class and the name of a method
+        that takes an instance of that class as its only argument
+        :return: A list of tuples.
+        """
+        if len(self.DISPATCH) == 0:
+            #get all function in current BO
+            method_list = [func for func in dir(self) if callable(getattr(self, func)) and not func.startswith("_")]
+            for method in method_list:
+                #get signature of current function
+                try:
+                    param = signature(getattr(self, method)).parameters
+                # Handle staticmethod
+                except ValueError as e:
+                    param=''
+                #one parameter
+                if (len(param)==1):
+                    #get parameter type
+                    annotation = str(param[list(param)[0]].annotation)
+                    #trim annotation format <class 'toto'>
+                    i = annotation.find("'")
+                    j = annotation.rfind("'")
+                    #if end is not found
+                    if j == -1:
+                        j = None
+                    classname = annotation[i+1:j]
+                    self.DISPATCH.append((classname,method))
+        return
 
     @staticmethod
     def OnGetConnections():
@@ -177,6 +417,8 @@ class IrisJSONEncoder(json.JSONEncoder):
     def default(self, o):
         if hasattr(o, '__dict__'):
             return o.__dict__
+        elif o.__class__.__name__ == 'DataFrame':
+            return 'dataframe:'+o.to_json()
         elif isinstance(o, datetime.datetime):
             r = o.isoformat()
             if o.microsecond:
@@ -218,6 +460,10 @@ class IrisJSONDecoder(json.JSONDecoder):
                 typ = value[:i]
                 if typ in {'datetime', 'time','date'}:
                     ret[key] = datetime.datetime.fromisoformat(value[i+1:]) 
+                elif typ == 'dataframe':
+                    module = importlib.import_module('pandas')
+                    pd = getattr(module, 'DataFrame')
+                    ret[key] = pd(value[i+1:])
                 elif typ == 'decimal':
                     ret[key] = decimal.Decimal(value[i+1:])
                 elif typ == 'uuid':

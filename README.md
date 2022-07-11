@@ -51,20 +51,25 @@ class MyBusinessOperation(BusinessOperation):
     
     def on_init(self):
         #This method is called when the component is becoming active in the production
-        print("[Python] ...MyBusinessOperation:on_init() is called")
-        self.log_info("Operation on_init")
+
+        self.log_info("[Python] ...MyBusinessOperation:on_init() is called")
+
         return
 
     def on_teardown(self):
         #This method is called when the component is becoming inactive in the production
-        print("[Python] ...MyBusinessOperation:on_teardown() is called")
+
+        self.log_info("[Python] ...MyBusinessOperation:on_teardown() is called")
+
         return
 
     def on_message(self, message_input:MyRequest):
-        # called from service/process/operation, message is of type MyRequest with property requestString
-        print("[Python] ...MyBusinessOperation:on_message() is called with message:"+message_input.request_string)
-        self.log_info("Operation on_message")
+        # called from service/process/operation, message is of type MyRequest with property request_string
+
+        self.log_info("[Python] ...MyBusinessOperation:on_message() is called with message:"+message_input.request_string)
+
         response = MyResponse("...MyBusinessOperation:on_message() echos")
+
         return response
 
 @dataclass
@@ -196,6 +201,14 @@ You can also click on the bottom on the `127.0.0.1:52773[IRISAPP]` button and se
 
 The production already has some code sample.
 
+Here we can see the production and our pure python services and operations:
+<img width="1177" alt="interop-screenshot" src="https://user-images.githubusercontent.com/47849411/131305197-d19511fd-6e05-4aec-a525-c88e6ebd0971.png">
+
+<br>
+
+New json trace for python native messages :
+<img width="910" alt="json-message-trace" src="https://user-images.githubusercontent.com/47849411/131305211-b8beb2c0-438d-4afc-a6d2-f94d854373ae.png">
+
 # 6. What's inside the repository
 
 ## 6.1. Dockerfile
@@ -316,6 +329,7 @@ description: an optional string parameter that sets a description property in th
 
 **Returns**:
     the response object from target.
+
 **Raises**:
 TypeError: if request is not of type Message or IRISObject.
 
@@ -536,15 +550,7 @@ class FilterPostRoutingRule(BusinessProcess):
         return
 
     def on_request(self, request):
-        # if from iris
-        if type(request).__module__.find('iris') == 0:
-            request = PostMessage(post=PostClass(title=request.Post.Title, 
-                                             selftext=request.Post.Selftext,
-                                             author=request.Post.Author, 
-                                             url=request.Post.Url,
-                                             created_utc=request.Post.CreatedUTC,
-                                             original_json=request.Post.OriginalJSON))
-        
+
         if 'dog'.upper() in request.post.selftext.upper():
             request.to_email_address = 'dog@company.com'
             request.found = 'Dog'
@@ -658,17 +664,15 @@ We will use `dataclass` to hold information in our [messages](#711-the-messages)
 
 Example of an object ( situated in the src/python/demo/reddit/obj.py file ):
 ```python
-from dataclasses import dataclass, field
-from dataclasses_json import LetterCase, dataclass_json, config
+from dataclasses import dataclass
 
-@dataclass_json(letter_case=LetterCase.CAMEL)
 @dataclass
 class PostClass:
     title: str
     selftext : str
     author: str
     url: str
-    created_utc: float = field(metadata=config(field_name="created_utc"))
+    created_utc: float = None
     original_json: str = None
 ```
 
@@ -733,4 +737,4 @@ e.g :
 
 Most of the code came from PEX for Python by Mo Cheng and Summer Gerry.
 
-The register part is from the not released feature form IRIS 2021.3.
+Works only on IRIS 2021.2 +

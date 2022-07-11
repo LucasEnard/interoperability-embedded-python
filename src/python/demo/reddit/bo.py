@@ -1,8 +1,6 @@
 
 from grongier.pex import BusinessOperation
 
-from message import MyRequest,MyMessage
-
 import iris
 
 import os
@@ -130,16 +128,20 @@ class FileOperationWithIrisAdapter(BusinessOperation):
         line = ts+" : "+title+" : "+author+" : "+url
         filename = request.found+".txt" 
         
-        self.Adapter.put_line(filename, line)
-        self.Adapter.put_line(filename, "")
-        self.Adapter.put_line(filename, text)
-        self.Adapter.put_line(filename, " * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *")
+        self.Adapter.PutLine(filename, line)
+        self.Adapter.PutLine(filename, "")
+        self.Adapter.PutLine(filename, text)
+        self.Adapter.PutLine(filename, " * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *")
 
         return
 
-if __name__ == "__main__":
-    EmailOperationWithIrisAdapter._get_info()
-    crud_person = EmailOperationWithIrisAdapter()
-    crud_person._dispatch_on_init('')
-    request = iris.cls('Ens.StringRequest')._New('toto')
-    response = crud_person._dispatch_on_message(request)
+class HeartBeatOperation(BusinessOperation):
+
+    def get_adapter_type():
+        return "Python.TestHeartBeat"
+
+    def on_message(self, request):
+        self.Adapter.on_task()
+        return 
+
+

@@ -9,9 +9,8 @@ Parameter SETTINGS = "%classname:Python BusinessService,%module:Python BusinessS
 
 Method dispatchProcessInput(pInput As %RegisteredObject) As %RegisteredObject
 {
-	set tSC = ..ProcessInput(pInput,.tOutput)
-	if $$$ISERR(tSC) throw ##class(%Exception.StatusException).CreateFromStatus(tSC)
-	quit tOutput
+	
+	quit ..%class."on_process_input"(pInput)
 }
 
 Method OnProcessInput(request As %RegisteredObject, Output response As %RegisteredObject) As %Status
@@ -21,9 +20,7 @@ Method OnProcessInput(request As %RegisteredObject, Output response As %Register
 		try {
 			set ..%class."_wait_for_next_call_interval" = ..%WaitForNextCallInterval
 		} catch {}
-		if $isObject(request),request.%IsA("Grongier.PEX.Message") set request = ..serialize(request)
 		set response = ..%class."_dispatch_on_process_input"(request)
-
 		try {
 			set ..%WaitForNextCallInterval = ..%class."_wait_for_next_call_interval"
 		} catch {}
